@@ -1,0 +1,30 @@
+services:
+  tutor:
+    build: .
+    restart: unless-stopped
+    env_file: .env.production
+    # Host port your reverse proxy forwards /learn to. Change the left
+    # side if 3300 collides with something else on the droplet.
+    ports:
+      - "3300:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17.5-alpine
+    restart: unless-stopped
+    # Reads POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB from the same
+    # file — keep them consistent with the DATABASE_URL you set there
+    # (host "postgres", the service name below, not localhost).
+    env_file: .env.production
+    volumes:
+      - tutor_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tutor}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  tutor_pg_data:

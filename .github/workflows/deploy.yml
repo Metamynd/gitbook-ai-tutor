@@ -1,0 +1,89 @@
+name: Deploy to server
+
+# Deploys ONLY when a release tag (v*) is pushed, or via a manual run.
+# Pushing to your default branch does not deploy — cut a tag to release:
+#   git tag v1.0.0 && git push --tags
+#
+# SSH in, hard-reset a checkout on the server to the tag, rebuild via
+# Docker Compose (using an .env.production that lives ONLY on the server,
+# never in git), then smoke-test the real production URL from the runner —
+# a green container isn't proof the product works, only that it started.
+# See DEPLOYMENT.md for full setup and the required secrets.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to deploy (tag, e.g. v1.0.0, or a commit SHA). Defaults to the selected ref."
+        required: false
+        default: ""
+
+concurrency:
+  group: deploy-tutor
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_REF: ${{ github.event.inputs.ref != '' && github.event.inputs.ref || github.ref_name }}
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          command_timeout: 20m
+          timeout: 60s
+          envs: DEPLOY_REF
+          script: |
+            set -euo pipefail
+            REPO_DIR="${{ secrets.DEPLOY_PATH }}"
+            if [ ! -d "$REPO_DIR/.git" ]; then
+              echo "→ First run: cloning repo into $REPO_DIR"
+              mkdir -p "$(dirname "$REPO_DIR")"
+              # HTTPS + a fine-grained PAT rather than SSH: works whether the
+              # repo is public or private, needs no known_hosts/deploy-key
+              # setup on the server, and if your org disables SSH deploy
+              # keys (common security policy) this sidesteps that entirely.
+              # REPO_TOKEN should be read-only, scoped to only this repo.
+              # It ends up embedded in $REPO_DIR/.git/config on the server —
+              # expected for an automated clone credential, same exposure an
+              # SSH private key on disk would have. Re-clone (or update the
+              # "origin" remote URL) if the token is ever rotated.
+              git clone "https://x-access-token:${{ secrets.REPO_TOKEN }}@github.com/${{ github.repository }}.git" "$REPO_DIR"
+            fi
+            cd "$REPO_DIR"
+            echo "→ Deploying ref: ${DEPLOY_REF}"
+            git fetch --all --tags --prune --force
+            git reset --hard "${DEPLOY_REF}"
+            echo "→ Now at: $(git rev-parse --short HEAD) ($(git describe --tags --always))"
+            if [ ! -f ".env.production" ]; then
+              echo "✗ Missing .env.production on the server (see .env.production.example). Create it, then re-deploy."
+              exit 1
+            fi
+            echo "→ Building and restarting containers"
+            docker compose up -d --build --remove-orphans
+            echo "→ Applying DB schema (idempotent)"
+            docker compose exec -T tutor node scripts/db-push.mjs
+            echo "→ Pruning old images"
+            docker image prune -f
+            echo "→ Status"
+            docker compose ps
+
+      # A green container isn't a green product — hit the real URL through
+      # the reverse proxy, the path an actual visitor takes.
+      - name: Check out the deployed ref
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.DEPLOY_REF }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+
+      - name: Smoke test the deployed app
+        run: node scripts/deploy/smoke.mjs --base "${{ secrets.DEPLOY_BASE_URL }}"

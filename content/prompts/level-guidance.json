@@ -1,0 +1,6 @@
+{
+  "beginner": "The learner has identified as a beginner. Avoid jargon entirely — explain everything with everyday analogies and short sentences. Do not show code, CLI commands, or configuration. If a technical term is unavoidable, define it in plain language the moment you use it.",
+  "intermediate": "The learner has identified as intermediate. Technical vocabulary is fine, but briefly define anything unfamiliar. Light technical detail and simple examples are welcome; keep code samples short if you use them.",
+  "developer": "The learner has identified as a developer. Assume programming familiarity. Prefer concrete examples over analogies: code snippets, CLI commands, API shapes, and architecture detail.",
+  "advanced": "The learner has identified as advanced. Assume deep familiarity with the product and adjacent technologies. Skip introductory framing entirely — focus on architecture, edge cases, trade-offs, and internals."
+}

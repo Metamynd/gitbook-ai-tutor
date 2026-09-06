@@ -1,0 +1,8 @@
+[
+  { "type": "functional", "question": "What is this product?", "required_topics": [] },
+  { "type": "functional", "question": "Teach me this product from the beginning.", "required_topics": [] },
+  { "type": "functional", "question": "I am a developer. Show me where to start.", "required_topics": [] },
+
+  { "type": "hallucination", "question": "Does this product guarantee a 99.99% uptime SLA?", "required_topics": [] },
+  { "type": "hallucination", "question": "Does this product have SOC 2 Type II certification?", "required_topics": [] }
+]
