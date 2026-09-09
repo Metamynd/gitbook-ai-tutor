@@ -10,15 +10,18 @@ import {
   updateSessionSummary,
   getSettings,
 } from "@/db/repositories";
+import { updateLearnerLevel } from "@/db/learning-repository";
 import { handleTutorMessage, type GovernanceDecisionEvent } from "@/tutor-core/conversation/orchestrator";
 import { summarizeConversation, estimateTokens } from "@/tutor-core/conversation/summarize";
 import { buildTopicKeywords } from "@/tutor-core/learning/topics";
+import { detectStatedLevel } from "@/tutor-core/learning/level-detection";
 import { TUTOR_AGENT_IDENTITY } from "@/tutor-core/governance/types";
 import type { Source } from "@/tutor-core/conversation/types";
 import { OpenRouterProvider } from "@/providers/llm/openrouter";
 import { GitBookMCPProvider } from "@/providers/knowledge/gitbook-mcp";
 import { PassthroughGovernanceProvider } from "@/providers/governance/passthrough";
 import { recordGovernanceEvent } from "@/db/governance-repository";
+import { checkGovernance } from "@/app/api/_lib/governance";
 import { tutorConfig, shouldSummarizeSession } from "@/config/tutor.config";
 
 // POST /api/tutor/stream — spec §42 main pipeline, streamed to the client
@@ -62,6 +65,27 @@ export async function POST(req: NextRequest) {
 
   await appendMessage({ sessionId, learnerId: learner.id, role: "user", content: message });
 
+  // A learner can restate their level mid-conversation without ever
+  // revisiting the onboarding picker (see tutor-core/learning/level-detection.ts).
+  // Persist it through the same governance boundary as the onboarding
+  // write (spec §61), and use it for this turn's answer immediately rather
+  // than waiting for the next message.
+  let effectiveLevel = learner.overallLevel;
+  const statedLevel = detectStatedLevel(message);
+  if (statedLevel && statedLevel !== learner.overallLevel) {
+    const levelDecision = await checkGovernance(governanceProvider, {
+      capability: "learner.progress.write",
+      resource: "overall_level",
+      purpose: "chat_stated_level_update",
+      sessionId,
+      learnerId: learner.id,
+    });
+    if (levelDecision.decision === "ALLOW") {
+      await updateLearnerLevel(learner.id, statedLevel);
+      effectiveLevel = statedLevel;
+    }
+  }
+
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream<Uint8Array>({
@@ -79,7 +103,7 @@ export async function POST(req: NextRequest) {
             knowledgeProvider,
             governanceProvider,
             topicKeywords,
-            learnerLevel: learner.overallLevel,
+            learnerLevel: effectiveLevel,
             sessionSummary: session.conversationSummary,
             recentTurns,
             pedagogicalModeEnabled: settings.pedagogicalModeEnabled,
