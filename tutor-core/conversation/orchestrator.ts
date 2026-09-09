@@ -6,7 +6,7 @@ import type {
   KnowledgeResult,
 } from "../providers/types";
 import type { TutorRequest, TutorEvent, Source } from "./types";
-import { classifyKnowledgeRequirement, KnowledgeRequirement, type TopicKeywords } from "../knowledge/classify";
+import { classifyKnowledgeRequirement, KnowledgeRequirement, buildSearchQuery, type TopicKeywords } from "../knowledge/classify";
 import { buildTutorContext, type ConversationTurn, type PromptOverrides } from "./context";
 import { TUTOR_AGENT_IDENTITY } from "../governance/types";
 import { tutorConfig } from "../../config/tutor.config";
@@ -74,7 +74,12 @@ export async function* handleTutorMessage(
     if (governanceDecision.decision === "ALLOW") {
       yield { type: "retrieval_started" };
       try {
-        results = await deps.knowledgeProvider.search(request.message);
+        const searchQuery = buildSearchQuery(
+          request.message,
+          deps.sessionSummary ?? null,
+          deps.recentTurns
+        );
+        results = await deps.knowledgeProvider.search(searchQuery);
         sources = results.map((r) => ({ id: r.id, title: r.title, url: r.url, section: r.section }));
         yield { type: "retrieval_complete", sources };
       } catch {

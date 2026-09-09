@@ -67,3 +67,39 @@ export function classifyKnowledgeRequirement(
   // Default to retrieving rather than skipping — see rationale above.
   return KnowledgeRequirement.DOCS_OPTIONAL;
 }
+
+// A stated interface/channel (dashboard vs CLI vs API) is often mentioned
+// once and never repeated, but the search query below is built from only
+// the current message. Without detecting it from earlier context too, the
+// tutor-system-prompt.md rule telling the model to match the stated channel
+// has nothing to work with — the search itself never looked for that
+// channel's docs, so it can't find them even when they exist.
+const CHANNEL_KEYWORDS: Record<string, string[]> = {
+  dashboard: ["dashboard", "the ui", "web interface", "web app", "the console"],
+  cli: ["cli", "command line", "command-line", "terminal"],
+  api: ["api", "sdk", "programmatically", "rest endpoint"],
+};
+
+export function detectStatedChannel(text: string): string | null {
+  const lower = text.toLowerCase();
+  for (const [channel, keywords] of Object.entries(CHANNEL_KEYWORDS)) {
+    if (keywords.some((kw) => lower.includes(kw))) return channel;
+  }
+  return null;
+}
+
+// If the current message already names a channel, the query is fine as-is.
+// Otherwise, check the session summary and recent turns for a channel the
+// learner stated earlier and fold it into the search query so retrieval can
+// actually find channel-specific docs.
+export function buildSearchQuery(
+  message: string,
+  sessionSummary: string | null,
+  recentTurns: { content: string }[]
+): string {
+  if (detectStatedChannel(message)) return message;
+
+  const priorContext = [sessionSummary ?? "", ...recentTurns.map((t) => t.content)].join(" ");
+  const statedChannel = detectStatedChannel(priorContext);
+  return statedChannel ? `${message} (via the ${statedChannel})` : message;
+}
