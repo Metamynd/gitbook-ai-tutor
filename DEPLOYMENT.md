@@ -62,6 +62,15 @@ Docker/SSH setup below isn't required.
    directory — a `700` dir owned by `root` blocks access even to a
    world-readable file inside it).
 
+6. **Rate limiting depends on knowing the real client IP** (`app/api/_lib/rate-limit.ts`).
+   If you put this behind Cloudflare or another CDN/proxy in front of your
+   reverse proxy, don't assume the first header that looks like a client
+   IP is trustworthy — a proxy chain can easily reflect its own edge node
+   back instead of the real visitor, which silently breaks rate limiting
+   for everyone rather than failing loudly. Read that file's comments and
+   verify what your actual proxy chain sets before relying on this in
+   production.
+
 ## GitHub repo setup
 
 Add these as repository secrets (Settings → Secrets and variables →

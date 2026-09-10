@@ -22,6 +22,7 @@ import { GitBookMCPProvider } from "@/providers/knowledge/gitbook-mcp";
 import { PassthroughGovernanceProvider } from "@/providers/governance/passthrough";
 import { recordGovernanceEvent } from "@/db/governance-repository";
 import { checkGovernance } from "@/app/api/_lib/governance";
+import { checkRateLimit } from "@/app/api/_lib/rate-limit";
 import { tutorConfig, shouldSummarizeSession } from "@/config/tutor.config";
 
 // POST /api/tutor/stream — spec §42 main pipeline, streamed to the client
@@ -40,7 +41,30 @@ const BodySchema = z.object({
   message: z.string().min(1).max(4000),
 });
 
+// The most expensive endpoint in the app (retrieval + LLM generation per
+// call), and the one a scripted client would hit hardest — tightest
+// budget of the four rate-limited routes.
+const RATE_LIMIT = 20;
+const RATE_WINDOW_MS = 60_000;
+
 export async function POST(req: NextRequest) {
+  const rateLimit = checkRateLimit(req, "tutor.stream", RATE_LIMIT, RATE_WINDOW_MS);
+  if (rateLimit.limited) {
+    // A plain JSON body would get silently dropped by the client's NDJSON
+    // line-parser (it buffers an unterminated final line and never flushes
+    // it) — shape this as one real TutorEvent line instead, so the
+    // existing `event.type === "error"` handling in chat-client.tsx
+    // surfaces it like any other mid-stream error.
+    const event = { type: "error", code: "rate_limited", message: "Too many messages — please slow down." };
+    return new Response(JSON.stringify(event) + "\n", {
+      status: 429,
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Retry-After": String(rateLimit.retryAfterSeconds),
+      },
+    });
+  }
+
   const parsed = BodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return new Response(JSON.stringify({ error: "invalid_request", message: parsed.error.message }), {

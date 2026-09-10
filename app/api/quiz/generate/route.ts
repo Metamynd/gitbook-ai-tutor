@@ -7,6 +7,7 @@ import { OpenRouterProvider } from "@/providers/llm/openrouter";
 import { GitBookMCPProvider } from "@/providers/knowledge/gitbook-mcp";
 import { PassthroughGovernanceProvider } from "@/providers/governance/passthrough";
 import { checkGovernance } from "@/app/api/_lib/governance";
+import { checkRateLimit } from "@/app/api/_lib/rate-limit";
 
 // POST /api/quiz/generate — spec §21. Retrieves docs for the chosen topic
 // first so the question is grounded, then asks the LLM to write it.
@@ -20,7 +21,20 @@ const BodySchema = z.object({
   topicId: z.string(),
 });
 
+// Every call is a docs search plus an LLM generation — real cost per
+// request, so this gets a tighter budget than plain reads.
+const RATE_LIMIT = 10;
+const RATE_WINDOW_MS = 60_000;
+
 export async function POST(req: NextRequest) {
+  const rateLimit = checkRateLimit(req, "quiz.generate", RATE_LIMIT, RATE_WINDOW_MS);
+  if (rateLimit.limited) {
+    return NextResponse.json(
+      { error: "rate_limited", message: "Too many requests — please slow down." },
+      { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } }
+    );
+  }
+
   const parsed = BodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid_request", message: parsed.error.message }, { status: 400 });

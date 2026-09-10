@@ -7,6 +7,7 @@ import { computeMasteryDelta } from "@/tutor-core/learning/mastery";
 import { OpenRouterProvider } from "@/providers/llm/openrouter";
 import { PassthroughGovernanceProvider } from "@/providers/governance/passthrough";
 import { checkGovernance } from "@/app/api/_lib/governance";
+import { checkRateLimit } from "@/app/api/_lib/rate-limit";
 import { tutorConfig } from "@/config/tutor.config";
 
 // POST /api/quiz/:id/answer — spec §22 evaluation, then the ONE place
@@ -17,6 +18,11 @@ import { tutorConfig } from "@/config/tutor.config";
 
 const llmProvider = new OpenRouterProvider();
 const governanceProvider = new PassthroughGovernanceProvider();
+
+// One LLM grading call per request — same budget as quiz generation, a
+// touch looser since one generate naturally leads to one answer.
+const RATE_LIMIT = 15;
+const RATE_WINDOW_MS = 60_000;
 
 const QuestionSchema = z.object({
   id: z.string(),
@@ -38,6 +44,14 @@ const BodySchema = z.object({
 });
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const rateLimit = checkRateLimit(req, "quiz.answer", RATE_LIMIT, RATE_WINDOW_MS);
+  if (rateLimit.limited) {
+    return NextResponse.json(
+      { error: "rate_limited", message: "Too many requests — please slow down." },
+      { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } }
+    );
+  }
+
   const parsed = BodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid_request", message: parsed.error.message }, { status: 400 });

@@ -21,6 +21,28 @@ const nextConfig = {
   // the Docker build. Pinning the root here is the fix Next's own
   // warning suggests.
   outputFileTracingRoot: __dirname,
+
+  // Content-Security-Policy is set in middleware.ts instead (easier to
+  // extend to a per-request nonce later if you add a script that needs
+  // one). Everything else that's static goes here.
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+          // Belt-and-suspenders: your reverse proxy (nginx, Caddy, etc.)
+          // is the right place to set this too, since it terminates TLS
+          // — keeping it here as well costs nothing and covers any
+          // deployment that skips that step.
+          { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

@@ -1,22 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getSettings, updateSettings } from "@/db/repositories";
+import { isAdminAuthorized } from "@/app/api/_lib/auth";
+import { checkRateLimit } from "@/app/api/_lib/rate-limit";
 
 // GET/POST /api/admin/settings — the operator-facing config for the
 // "Activate Pedagogical Tutor" checkbox + custom prompt textarea (app/admin).
-// This is single global config for this single-tenant deployment (spec
-// §60), not per-user, so it's gated by a shared token rather than a full
-// auth system — there's no login/accounts anywhere else in this app either
-// (spec decision: no login in v1).
+// This is single global config for this single-tenant deployment, not
+// per-user, so it's gated by a shared token rather than a full auth
+// system — there's no login/accounts anywhere else in this app either.
 
-function isAuthorized(req: NextRequest): boolean {
-  const expected = process.env.ADMIN_SETTINGS_TOKEN;
-  if (!expected) return false; // no token configured means the admin page is disabled
-  return req.headers.get("x-admin-token") === expected;
-}
+// A shared static token with no rate limit is brute-forceable given enough
+// requests; this caps the guess rate regardless of token strength.
+const RATE_LIMIT = 10;
+const RATE_WINDOW_MS = 60_000;
 
 export async function GET(req: NextRequest) {
-  if (!isAuthorized(req)) {
+  const rateLimit = checkRateLimit(req, "admin.settings", RATE_LIMIT, RATE_WINDOW_MS);
+  if (rateLimit.limited) {
+    return NextResponse.json(
+      { error: "rate_limited", message: "Too many requests — please slow down." },
+      { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } }
+    );
+  }
+  if (!isAdminAuthorized(req)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   return NextResponse.json(await getSettings());
@@ -28,7 +35,14 @@ const BodySchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  if (!isAuthorized(req)) {
+  const rateLimit = checkRateLimit(req, "admin.settings", RATE_LIMIT, RATE_WINDOW_MS);
+  if (rateLimit.limited) {
+    return NextResponse.json(
+      { error: "rate_limited", message: "Too many requests — please slow down." },
+      { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } }
+    );
+  }
+  if (!isAdminAuthorized(req)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
