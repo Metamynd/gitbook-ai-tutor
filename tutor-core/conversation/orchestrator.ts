@@ -7,6 +7,7 @@ import type {
 } from "../providers/types";
 import type { TutorRequest, TutorEvent, Source } from "./types";
 import { classifyKnowledgeRequirement, KnowledgeRequirement, buildSearchQuery, type TopicKeywords } from "../knowledge/classify";
+import { getGlossaryResult } from "../knowledge/glossary";
 import { buildTutorContext, type ConversationTurn, type PromptOverrides } from "./context";
 import { TUTOR_AGENT_IDENTITY } from "../governance/types";
 import { tutorConfig } from "../../config/tutor.config";
@@ -80,6 +81,12 @@ export async function* handleTutorMessage(
           deps.recentTurns
         );
         results = await deps.knowledgeProvider.search(searchQuery);
+
+        const glossary = await getGlossaryResult(deps.knowledgeProvider);
+        if (glossary && !results.some((r) => r.url && r.url === glossary.url)) {
+          results = [...results, glossary];
+        }
+
         sources = results.map((r) => ({ id: r.id, title: r.title, url: r.url, section: r.section }));
         yield { type: "retrieval_complete", sources };
       } catch {
