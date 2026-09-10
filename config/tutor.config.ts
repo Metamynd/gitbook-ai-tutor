@@ -18,6 +18,13 @@ export const tutorConfig = {
   knowledge: {
     provider: "gitbook-mcp",
     endpoint: process.env.GITBOOK_MCP_URL ?? "",
+    // Optional: a dedicated glossary/definitions page, always included
+    // alongside whatever the per-question search returns (see
+    // tutor-core/knowledge/glossary.ts for why — a compact definitions
+    // page reliably loses to long-form pages in GitBook's own search
+    // ranking for natural-language questions). Most GitBook sites won't
+    // have one; leave unset and this does nothing.
+    glossaryUrl: process.env.GITBOOK_GLOSSARY_URL ?? "",
   },
 
   llm: {
